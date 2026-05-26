@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WhatsApp Bulk Sender</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    /* ── Header ──────────────────────────────────────────── */
+    header {
+      background: #25d366;
+      color: #fff;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15);
+    }
+    header h1 { font-size: 20px; font-weight: 700; letter-spacing: -.3px; }
+    header h1 span { opacity: .7; font-weight: 400; font-size: 13px; margin-left: 8px; }
+
+    #wa-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    #wa-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #fff;
+      opacity: .4;
+      transition: all .3s;
+    }
+    #wa-dot.connected { background: #fff; opacity: 1; box-shadow: 0 0 0 3px rgba(255,255,255,.3); }
+    #wa-dot.connecting { background: #ffc107; opacity: 1; animation: pulse 1s infinite; }
+    #wa-dot.qr { background: #fff; opacity: 1; animation: pulse 1s infinite; }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: .3; }
+    }
+
+    /* ── Main layout ──────────────────────────────────────── */
+    main {
+      max-width: 920px;
+      margin: 28px auto;
+      padding: 0 16px;
+      display: grid;
+      gap: 20px;
+    }
+
+    /* ── Card ─────────────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      overflow: hidden;
+    }
+    .card-header {
+      padding: 16px 22px;
+      border-bottom: 1px solid #f0f0f0;
+      font-weight: 700;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .card-header .icon { font-size: 18px; }
+    .card-body { padding: 22px; }
+
+    /* ── QR Section ───────────────────────────────────────── */
+    #qr-section { text-align: center; }
+    #qr-section p { color: #666; font-size: 14px; margin-bottom: 18px; line-height: 1.6; }
+    #qr-img { width: 220px; height: 220px; border: 3px solid #25d366; border-radius: 12px; margin: 0 auto 16px; object-fit: contain; display: none; }
+    #qr-placeholder {
+      width: 220px; height: 220px;
+      border: 2px dashed #ccc; border-radius: 12px;
+      margin: 0 auto 16px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; color: #aaa;
+    }
+    #connected-info { display: none; text-align: center; padding: 12px; }
+    #connected-info .phone-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: #e8f5e9; color: #2e7d32;
+      padding: 10px 20px; border-radius: 999px;
+      font-weight: 600; font-size: 15px;
+    }
+
+    /* ── Buttons ──────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 22px;
+      border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: all .2s;
+    }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-green { background: #25d366; color: #fff; }
+    .btn-green:hover:not(:disabled) { background: #1ebe59; }
+    .btn-red { background: #e53935; color: #fff; }
+    .btn-red:hover:not(:disabled) { background: #c62828; }
+    .btn-outline { background: transparent; border: 1.5px solid #ddd; color: #555; }
+    .btn-outline:hover:not(:disabled) { border-color: #25d366; color: #25d366; }
+    .btn-blue { background: #1976d2; color: #fff; }
+    .btn-blue:hover:not(:disabled) { background: #1565c0; }
+
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+    /* ── Form controls ────────────────────────────────────── */
+    label { font-size: 13px; font-weight: 600; color: #444; display: block; margin-bottom: 6px; }
+    input[type=file], select, input[type=number] {
+      width: 100%; padding: 10px 12px;
+      border: 1.5px solid #e0e0e0; border-radius: 8px;
+      font-size: 14px; outline: none;
+      transition: border-color .2s;
+    }
+    input[type=file]:focus, select:focus, input[type=number]:focus { border-color: #25d366; }
+
+    textarea {
+      width: 100%; padding: 12px;
+      border: 1.5px solid #e0e0e0; border-radius: 8px;
+      font-size: 14px; font-family: inherit;
+      resize: vertical; min-height: 120px; outline: none;
+      transition: border-color .2s;
+      line-height: 1.6;
+    }
+    textarea:focus { border-color: #25d366; }
+
+    .form-row { margin-bottom: 16px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+
+    /* ── Variable chips ───────────────────────────────────── */
+    #var-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .chip {
+      background: #e8f5e9; color: #2e7d32;
+      padding: 4px 12px; border-radius: 999px;
+      font-size: 12px; font-weight: 600;
+      cursor: pointer; border: 1.5px solid #c8e6c9;
+      transition: background .15s;
+    }
+    .chip:hover { background: #c8e6c9; }
+
+    /* ── Delay inputs ─────────────────────────────────────── */
+    .delay-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .delay-row label { margin: 0; white-space: nowrap; }
+    .delay-row input { width: 80px; }
+    .delay-hint { font-size: 12px; color: #888; margin-top: 6px; }
+
+    /* ── Contact preview ──────────────────────────────────── */
+    #contact-count { font-size: 13px; color: #555; margin-bottom: 10px; }
+    .contact-table-wrap { overflow-x: auto; max-height: 240px; overflow-y: auto; border: 1px solid #f0f0f0; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th { background: #f8f9fa; padding: 9px 14px; text-align: left; font-weight: 600; position: sticky; top: 0; }
+    td { padding: 8px 14px; border-top: 1px solid #f5f5f5; }
+    tr:hover td { background: #fafafa; }
+    .del-btn {
+      background: none; border: none; cursor: pointer;
+      color: #ccc; font-size: 13px; padding: 2px 6px;
+      border-radius: 4px; transition: all .15s;
+    }
+    .del-btn:hover { background: #fdecea; color: #e53935; }
+
+    /* ── Progress / Log ───────────────────────────────────── */
+    #progress-section { display: none; }
+
+    .progress-bar-bg {
+      height: 10px; background: #e0e0e0; border-radius: 999px; overflow: hidden; margin-bottom: 10px;
+    }
+    .progress-bar-fill {
+      height: 100%; background: #25d366; border-radius: 999px;
+      transition: width .4s ease;
+      width: 0%;
+    }
+    #progress-label { font-size: 13px; color: #555; margin-bottom: 14px; }
+
+    #log {
+      background: #1a1a2e; color: #e0e0e0;
+      border-radius: 10px; padding: 14px 16px;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 12.5px; line-height: 1.7;
+      max-height: 280px; overflow-y: auto;
+    }
+    .log-sent   { color: #69f0ae; }
+    .log-failed { color: #ff5252; }
+    .log-skip   { color: #ffd740; }
+    .log-info   { color: #82b1ff; }
+    .log-wait   { color: #b0bec5; }
+
+    /* ── Formatting toolbar ───────────────────────────────── */
+    .fmt-toolbar {
+      display: flex; align-items: center; gap: 2px;
+      background: #f8f9fa; border: 1.5px solid #e0e0e0;
+      border-bottom: none; border-radius: 8px 8px 0 0;
+      padding: 6px 8px;
+    }
+    .fmt-btn {
+      background: none; border: none; cursor: pointer;
+      width: 32px; height: 30px; border-radius: 6px;
+      font-size: 14px; color: #444;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s;
+    }
+    .fmt-btn:hover { background: #e8f5e9; color: #1b5e20; }
+    .fmt-sep { width: 1px; height: 20px; background: #ddd; margin: 0 4px; }
+    /* Connect textarea top border to toolbar */
+    .fmt-toolbar + textarea { border-top-left-radius: 0; border-top-right-radius: 0; }
+
+    /* ── Tabs ─────────────────────────────────────────────── */
+    .tab-bar { display: flex; gap: 6px; margin-bottom: 18px; border-bottom: 2px solid #f0f0f0; padding-bottom: 0; }
+    .tab {
+      padding: 9px 18px; border: none; background: none;
+      font-size: 13px; font-weight: 600; color: #888;
+      cursor: pointer; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; border-radius: 6px 6px 0 0;
+      transition: all .2s;
+    }
+    .tab:hover { color: #25d366; }
+    .tab.active { color: #25d366; border-bottom-color: #25d366; background: #f0fdf4; }
+
+    /* ── Disclaimer ───────────────────────────────────────── */
+    .disclaimer {
+      background: #fff8e1; border: 1.5px solid #ffe082;
+      border-radius: 10px; padding: 14px 18px;
+      font-size: 13px; color: #5d4037; line-height: 1.6;
+    }
+    .disclaimer strong { color: #bf360c; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ─────────────────────────────────────────────────────────── -->
+<header>
+  <h1>WhatsApp Bulk Sender <span>Educational / Testing</span></h1>
+  <div id="wa-badge">
+    <div id="wa-dot"></div>
+    <span id="wa-label">Disconnected</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Disclaimer ──────────────────────────────────────────────────── -->
+  <div class="disclaimer">
+    <strong>⚠️ Educational use only.</strong>
+    Only message people who have given explicit consent. Spamming via WhatsApp violates
+    <a href="https://www.whatsapp.com/legal/terms-of-service" target="_blank" style="color:#e65100">WhatsApp's Terms of Service</a>
+    and may result in your number being banned.
+  </div>
+
+  <!-- ── Step 1: WhatsApp Login ──────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header"><span class="icon">📱</span> Step 1 — Connect WhatsApp</div>
+    <div class="card-body">
+      <div id="qr-section">
+        <p>Click <strong>Connect</strong> to generate a QR code, then scan it with WhatsApp on your phone.<br>
+           <em>Phone → Linked Devices → Link a Device</em></p>
+        <div id="qr-placeholder">QR code appears here</div>
+        <img id="qr-img" alt="QR Code" />
+      </div>
+      <div id="connected-info">
+        <div class="phone-badge">✅ Connected as +<span id="phone-display"></span></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green" id="btn-connect" onclick="connectWA()">Connect WhatsApp</button>
+        <button class="btn btn-red" id="btn-disconnect" style="display:none" onclick="disconnectWA()">Disconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Step 2: Upload Contacts ───────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header"><span class="icon">👥</span> Step 2 — Add Contacts</div>
+    <div class="card-body">
+
+      <!-- Tabs -->
+      <div class="tab-bar">
+        <button class="tab active" id="tab-csv" onclick="switchTab('csv')">📂 Upload CSV</button>
+        <button class="tab" id="tab-manual" onclick="switchTab('manual')">✏️ Enter Manually</button>
+      </div>
+
+      <!-- CSV tab -->
+      <div id="pane-csv">
+        <div class="form-row">
+          <label>CSV File <small style="font-weight:400;color:#888">(must include a column with phone numbers)</small></label>
+          <input type="file" id="csv-file" accept=".csv" onchange="parseCSV()" />
+        </div>
+        <div class="form-row" id="phone-col-row" style="display:none">
+          <label>Phone number column</label>
+          <select id="phone-col"></select>
+        </div>
+      </div>
+
+      <!-- Manual tab -->
+      <div id="pane-manual" style="display:none">
+        <div class="form-row">
+          <label>Enter contacts <small style="font-weight:400;color:#888">— one per line, format: <code>name, number</code> or just <code>number</code></small></label>
+          <textarea id="manual-input" rows="8" placeholder="Alice, 919876543210&#10;Bob, 917890123456&#10;919123456789"></textarea>
+        </div>
+        <div class="btn-row" style="margin-top:0">
+          <button class="btn btn-green" onclick="parseManual()">Add Contacts</button>
+          <button class="btn btn-outline" onclick="clearManual()">Clear</button>
+        </div>
+      </div>
+
+      <!-- Shared preview -->
+      <div id="contact-preview" style="display:none; margin-top:18px">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px">
+          <span id="contact-count" style="font-size:13px;color:#555"></span>
+          <button class="btn btn-outline" style="padding:5px 14px;font-size:12px" onclick="clearContacts()">Clear all</button>
+        </div>
+        <div class="contact-table-wrap">
+          <table>
+            <thead id="table-head"></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Step 3: Compose Message ───────────────────────────────────── -->
+  <div class="card">
+    <div class="card-header"><span class="icon">✏️</span> Step 3 — Compose Message</div>
+    <div class="card-body">
+      <div class="form-row">
+        <label>Message Template</label>
+        <div class="fmt-toolbar">
+          <button class="fmt-btn" title="Bold (*text*)"        onclick="wrapFmt('*')"><b>B</b></button>
+          <button class="fmt-btn" title="Italic (_text_)"      onclick="wrapFmt('_')"><i>I</i></button>
+          <button class="fmt-btn" title="Strikethrough (~text~)" onclick="wrapFmt('~')"><s>S</s></button>
+          <button class="fmt-btn" title="Monospace (` + '`' + `text` + '`' + `)" onclick="wrapFmt('`')"><code style="font-size:13px">M</code></button>
+          <div class="fmt-sep"></div>
+          <button class="fmt-btn" title="Insert link"          onclick="insertLink()">🔗</button>
+          <button class="fmt-btn" title="New line"             onclick="insertNewline()">↵</button>
+        </div>
+        <textarea id="msg-text" placeholder="Hi {{name}}, this is a message for you!"></textarea>
+        <div style="margin-top:8px; font-size:12px; color:#888">
+          Use <code>{{column_name}}</code> to personalise — e.g. <code>{{name}}</code>, <code>{{email}}</code>
+        </div>
+      </div>
+      <div class="form-row" id="chips-row" style="display:none">
+        <label>Insert variable (click to add to message):</label>
+        <div id="var-chips"></div>
+      </div>
+      <div class="form-row">
+        <label>Delay between messages</label>
+        <div class="delay-row">
+          <label>Min (seconds):</label>
+          <input type="number" id="delay-min" value="5" min="3" max="300" />
+          <label>Max (seconds):</label>
+          <input type="number" id="delay-max" value="12" min="3" max="300" />
+        </div>
+        <div class="delay-hint">A random delay between min–max is used. Minimum is 3s to reduce ban risk.</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green" id="btn-send" onclick="startSend()">🚀 Send Messages</button>
+        <button class="btn btn-red" id="btn-stop" style="display:none" onclick="stopSend()">⏹ Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Progress ──────────────────────────────────────────────────── -->
+  <div class="card" id="progress-section">
+    <div class="card-header"><span class="icon">📊</span> Progress</div>
+    <div class="card-body">
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+      <div id="progress-label">Preparing...</div>
+      <div id="log"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  const socket = io();
+
+  let csvRows = [];       // all loaded contacts
+  let csvColumns = [];    // column names (for variable chips + phone col selector)
+  let isSending = false;
+
+  // ── Socket events ────────────────────────────────────────────────
+  socket.on('wa:status', ({ status, qrImage, phone }) => {
+    const dot   = document.getElementById('wa-dot');
+    const label = document.getElementById('wa-label');
+    const qrImg = document.getElementById('qr-img');
+    const qrPh  = document.getElementById('qr-placeholder');
+    const info  = document.getElementById('connected-info');
+    const btnC  = document.getElementById('btn-connect');
+    const btnD  = document.getElementById('btn-disconnect');
+
+    dot.className = status;
+
+    if (status === 'disconnected') {
+      label.textContent = 'Disconnected';
+      qrImg.style.display = 'none';
+      qrPh.style.display  = 'flex';
+      info.style.display  = 'none';
+      btnC.style.display  = '';
+      btnD.style.display  = 'none';
+      btnC.disabled = false;
+      btnC.textContent = 'Connect WhatsApp';
+    } else if (status === 'initializing') {
+      const msg = percent != null ? `Starting… ${percent}%` : 'Starting…';
+      label.textContent = msg;
+      btnC.disabled = true;
+      btnC.textContent = msg;
+      // Hide QR if we're mid-init before QR
+      if (!qrImage) {
+        qrImg.style.display = 'none';
+        qrPh.textContent = 'Launching browser…';
+        qrPh.style.display = 'flex';
+      }
+    } else if (status === 'qr') {
+      label.textContent = 'Scan QR Code';
+      qrImg.src = qrImage;
+      qrImg.style.display = 'block';
+      qrPh.style.display  = 'none';
+      info.style.display  = 'none';
+      btnC.style.display  = 'none';
+      btnD.style.display  = '';
+    } else if (status === 'connected') {
+      label.textContent = 'Connected ✓';
+      qrImg.style.display = 'none';
+      qrPh.style.display  = 'none';
+      info.style.display  = 'block';
+      document.getElementById('phone-display').textContent = phone || '';
+      btnC.style.display  = 'none';
+      btnD.style.display  = '';
+    }
+  });
+
+  socket.on('send:start', ({ total }) => {
+    document.getElementById('progress-section').style.display = '';
+    setProgress(0, total, 0, 0);
+    logMsg('info', `Starting — ${total} contacts`);
+  });
+
+  socket.on('send:result', ({ index, phone, status, reason, sent, failed, total }) => {
+    if (status === 'sent') {
+      logMsg('sent', `[${index+1}/${total}] ✅ ${phone} — sent`);
+    } else if (status === 'failed') {
+      logMsg('failed', `[${index+1}/${total}] ❌ ${phone} — ${reason}`);
+    } else if (status === 'skip') {
+      logMsg('skip', `[${index+1}/${total}] ⚠️ ${phone || '(empty)'} — ${reason}`);
+    }
+    setProgress(index + 1, total, sent, failed);
+  });
+
+  socket.on('send:waiting', ({ delay, next }) => {
+    logMsg('wait', `⏳ Waiting ${delay}s before next message…`);
+  });
+
+  socket.on('send:done', ({ sent, failed, total }) => {
+    logMsg('info', `Done. Sent: ${sent} | Failed: ${failed} | Total: ${total}`);
+    document.getElementById('btn-send').style.display = '';
+    document.getElementById('btn-stop').style.display = 'none';
+    isSending = false;
+  });
+
+  socket.on('send:aborted', ({ sent, failed }) => {
+    logMsg('skip', `Stopped by user. Sent: ${sent} | Failed: ${failed}`);
+    document.getElementById('btn-send').style.display = '';
+    document.getElementById('btn-stop').style.display = 'none';
+    isSending = false;
+  });
+
+  // ── Tab switching ────────────────────────────────────────────────
+  function switchTab(tab) {
+    document.getElementById('pane-csv').style.display    = tab === 'csv'    ? '' : 'none';
+    document.getElementById('pane-manual').style.display = tab === 'manual' ? '' : 'none';
+    document.getElementById('tab-csv').classList.toggle('active',    tab === 'csv');
+    document.getElementById('tab-manual').classList.toggle('active', tab === 'manual');
+  }
+
+  // ── WA Connect / Disconnect ──────────────────────────────────────
+  async function connectWA() {
+    await fetch('/api/wa/connect', { method: 'POST' });
+  }
+
+  async function disconnectWA() {
+    if (!confirm('Disconnect WhatsApp?')) return;
+    await fetch('/api/wa/disconnect', { method: 'POST' });
+  }
+
+  // ── CSV Parse ────────────────────────────────────────────────────
+  async function parseCSV() {
+    const file = document.getElementById('csv-file').files[0];
+    if (!file) return;
+
+    const form = new FormData();
+    form.append('file', file);
+
+    const res  = await fetch('/api/csv/parse', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.error) { alert(data.error); return; }
+
+    csvRows    = data.rows.map(capitaliseName);
+    csvColumns = data.columns;
+
+    refreshPhoneColSelector();
+    refreshVarChips();
+    buildPreviewTable(csvRows, csvColumns);
+  }
+
+  // ── Manual Entry ─────────────────────────────────────────────────
+  function parseManual() {
+    const raw = document.getElementById('manual-input').value.trim();
+    if (!raw) return;
+
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+    const newRows = [];
+
+    for (const line of lines) {
+      // Accept:  "Name, number"  or  "Name | number"  or just  "number"
+      const parts = line.split(/,|\|/).map(p => p.trim());
+      if (parts.length >= 2) {
+        newRows.push(capitaliseName({ name: parts[0], phone: parts[1] }));
+      } else if (parts.length === 1 && parts[0]) {
+        newRows.push({ name: '', phone: parts[0] });
+      }
+    }
+
+    if (newRows.length === 0) { alert('No valid entries found.'); return; }
+
+    // Merge into csvRows, ensuring 'name' and 'phone' columns exist
+    if (!csvColumns.includes('name'))  csvColumns = ['name',  ...csvColumns.filter(c => c !== 'name')];
+    if (!csvColumns.includes('phone')) csvColumns = ['phone', ...csvColumns.filter(c => c !== 'phone')];
+    // Ensure existing CSV rows have these columns too
+    csvRows = csvRows.map(r => ({ name: '', phone: '', ...r }));
+
+    csvRows = [...csvRows, ...newRows];
+
+    refreshPhoneColSelector();
+    refreshVarChips();
+    buildPreviewTable(csvRows, csvColumns);
+
+    document.getElementById('manual-input').value = '';
+  }
+
+  function clearManual() {
+    document.getElementById('manual-input').value = '';
+  }
+
+  function clearContacts() {
+    csvRows = []; csvColumns = [];
+    document.getElementById('contact-preview').style.display = 'none';
+    document.getElementById('phone-col-row').style.display = 'none';
+    document.getElementById('chips-row').style.display = 'none';
+    document.getElementById('csv-file').value = '';
+  }
+
+  // ── Shared helpers ────────────────────────────────────────────────
+  function refreshPhoneColSelector() {
+    const sel = document.getElementById('phone-col');
+    const prev = sel.value;
+    sel.innerHTML = '';
+    csvColumns.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      if (c === prev) opt.selected = true;
+      else if (!prev && /phone|mobile|number|tel|contact/i.test(c)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    document.getElementById('phone-col-row').style.display = csvColumns.length ? '' : 'none';
+  }
+
+  function refreshVarChips() {
+    const chips = document.getElementById('var-chips');
+    chips.innerHTML = '';
+    csvColumns.forEach(c => {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = `{{${c}}}`;
+      chip.onclick = () => insertVar(c);
+      chips.appendChild(chip);
+    });
+    document.getElementById('chips-row').style.display = csvColumns.length ? '' : 'none';
+  }
+
+  function buildPreviewTable(rows, cols) {
+    const head = document.getElementById('table-head');
+    const body = document.getElementById('table-body');
+    head.innerHTML = `<tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}<th style="width:40px"></th></tr>`;
+    body.innerHTML = rows.map((row, i) =>
+      `<tr>${cols.map(c => `<td>${esc(row[c] ?? '')}</td>`).join('')}
+        <td><button class="del-btn" onclick="deleteContact(${i})" title="Remove">✕</button></td>
+      </tr>`
+    ).join('');
+    document.getElementById('contact-count').textContent =
+      `${rows.length} contact${rows.length !== 1 ? 's' : ''} loaded`;
+    document.getElementById('contact-preview').style.display = rows.length ? '' : 'none';
+  }
+
+  function capitaliseName(row) {
+    if (row.name) row.name = row.name.charAt(0).toUpperCase() + row.name.slice(1);
+    return row;
+  }
+
+  function deleteContact(i) {
+    csvRows.splice(i, 1);
+    if (csvRows.length === 0) { clearContacts(); return; }
+    buildPreviewTable(csvRows, csvColumns);
+  }
+
+  // ── Formatting helpers ────────────────────────────────────────────
+  function wrapFmt(marker) {
+    const ta = document.getElementById('msg-text');
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const selected = ta.value.slice(start, end);
+    const wrapped = selected ? `${marker}${selected}${marker}` : `${marker}${marker}`;
+    ta.value = ta.value.slice(0, start) + wrapped + ta.value.slice(end);
+    ta.focus();
+    // Place cursor inside markers if nothing was selected
+    if (!selected) {
+      ta.selectionStart = ta.selectionEnd = start + marker.length;
+    } else {
+      ta.selectionStart = start;
+      ta.selectionEnd   = start + wrapped.length;
+    }
+  }
+
+  function insertLink() {
+    const url = prompt('Enter URL:');
+    if (!url) return;
+    const ta = document.getElementById('msg-text');
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    // If text is selected, keep it before the URL; otherwise just insert the URL
+    const before = ta.value.slice(start, end).trim();
+    const insert = before ? `${before} ${url}` : url;
+    ta.value = ta.value.slice(0, start) + insert + ta.value.slice(end);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = start + insert.length;
+  }
+
+  function insertNewline() {
+    const ta = document.getElementById('msg-text');
+    const pos = ta.selectionStart;
+    ta.value = ta.value.slice(0, pos) + '\n' + ta.value.slice(pos);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = pos + 1;
+  }
+
+  function insertVar(col) {
+    const ta = document.getElementById('msg-text');
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const val = ta.value;
+    ta.value = val.slice(0, start) + `{{${col}}}` + val.slice(end);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = start + col.length + 4;
+  }
+
+  // ── Send ─────────────────────────────────────────────────────────
+  async function startSend() {
+    if (isSending) return;
+
+    const phoneColumn = document.getElementById('phone-col').value;
+    const message     = document.getElementById('msg-text').value.trim();
+    const minDelay    = Math.max(3, parseInt(document.getElementById('delay-min').value) || 5);
+    const maxDelay    = Math.max(minDelay, parseInt(document.getElementById('delay-max').value) || 12);
+
+    if (csvRows.length === 0) { alert('Please add contacts via CSV or manual entry first.'); return; }
+    if (!message) { alert('Message cannot be empty.'); return; }
+
+    const waStatus = await fetch('/api/wa/status').then(r => r.json());
+    if (waStatus.status !== 'connected') { alert('WhatsApp is not connected. Scan the QR code first.'); return; }
+
+    if (!confirm(`Send to ${csvRows.length} contacts?\n\nDelay: ${minDelay}–${maxDelay}s between messages.`)) return;
+
+    isSending = true;
+    document.getElementById('btn-send').style.display = 'none';
+    document.getElementById('btn-stop').style.display = '';
+    document.getElementById('log').innerHTML = '';
+
+    await fetch('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: csvRows, phoneColumn, message, minDelay, maxDelay }),
+    });
+  }
+
+  async function stopSend() {
+    await fetch('/api/send/stop', { method: 'POST' });
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  function setProgress(done, total, sent, failed) {
+    const pct = total > 0 ? (done / total * 100) : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-label').textContent =
+      `${done} / ${total} processed  —  ✅ ${sent} sent  ❌ ${failed} failed`;
+  }
+
+  function logMsg(type, text) {
+    const log = document.getElementById('log');
+    const line = document.createElement('div');
+    line.className = `log-${type}`;
+    line.textContent = `[${new Date().toLocaleTimeString()}]  ${text}`;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
