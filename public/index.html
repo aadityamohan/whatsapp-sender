@@ -356,6 +356,11 @@
         <div id="var-chips"></div>
       </div>
       <div class="form-row">
+        <label>Attach PDF <small style="font-weight:400;color:#888">(optional — sent as document with message as caption)</small></label>
+        <input type="file" id="pdf-file" accept=".pdf" onchange="uploadPdf()" />
+        <div id="pdf-status" style="font-size:12px;color:#888;margin-top:6px"></div>
+      </div>
+      <div class="form-row">
         <label>Delay between messages</label>
         <div class="delay-row">
           <label>Min (seconds):</label>
@@ -390,6 +395,7 @@
   let csvRows = [];       // all loaded contacts
   let csvColumns = [];    // column names (for variable chips + phone col selector)
   let isSending = false;
+  let uploadedPdf = null; // { filename, originalName }
 
   // ── Socket events ────────────────────────────────────────────────
   socket.on('wa:status', ({ status, qrImage, phone }) => {
@@ -493,6 +499,29 @@
   async function disconnectWA() {
     if (!confirm('Disconnect WhatsApp?')) return;
     await fetch('/api/wa/disconnect', { method: 'POST' });
+  }
+
+  // ── PDF Upload ───────────────────────────────────────────────────
+  async function uploadPdf() {
+    const file = document.getElementById('pdf-file').files[0];
+    const statusEl = document.getElementById('pdf-status');
+    if (!file) { uploadedPdf = null; statusEl.textContent = ''; return; }
+
+    statusEl.textContent = 'Uploading…';
+    const form = new FormData();
+    form.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload/pdf', { method: 'POST', body: form });
+      const data = await res.json();
+      if (data.error) { statusEl.textContent = '❌ ' + data.error; uploadedPdf = null; return; }
+      uploadedPdf = data;
+      statusEl.style.color = '#2e7d32';
+      statusEl.textContent = `✅ ${data.originalName} ready to attach`;
+    } catch (e) {
+      statusEl.textContent = '❌ Upload failed';
+      uploadedPdf = null;
+    }
   }
 
   // ── CSV Parse ────────────────────────────────────────────────────
@@ -688,7 +717,8 @@
     await fetch('/api/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows: csvRows, phoneColumn, message, minDelay, maxDelay }),
+      body: JSON.stringify({ rows: csvRows, phoneColumn, message, minDelay, maxDelay,
+        pdfFilename: uploadedPdf?.filename, pdfOriginalName: uploadedPdf?.originalName }),
     });
   }
 

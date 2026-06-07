@@ -6,7 +6,7 @@ const csv = require("csv-parser");
 const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 
 const app = express();
 const server = http.createServer(app);
@@ -22,6 +22,22 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     if (path.extname(file.originalname).toLowerCase() === ".csv") cb(null, true);
     else cb(new Error("Only CSV files are allowed"));
+  },
+});
+
+// ─── Multer (PDF upload, disk storage) ────────────────────────────────────────
+const pdfDir = path.join(__dirname, ".tmp_uploads");
+if (!fs.existsSync(pdfDir)) fs.mkdirSync(pdfDir);
+
+const uploadPdf = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, pdfDir),
+    filename: (req, file, cb) => cb(null, `pdf_${Date.now()}.pdf`),
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === "application/pdf") cb(null, true);
+    else cb(new Error("Only PDF files are allowed"));
   },
 });
 
@@ -169,12 +185,20 @@ app.post("/api/csv/parse", upload.single("file"), (req, res) => {
     .on("error", (e) => res.status(500).json({ error: e.message }));
 });
 
+app.post("/api/upload/pdf", (req, res) => {
+  uploadPdf.single("file")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    res.json({ filename: req.file.filename, originalName: req.file.originalname });
+  });
+});
+
 // Send bulk messages
 app.post("/api/send", async (req, res) => {
   if (waStatus !== "connected") return res.status(400).json({ error: "WhatsApp is not connected" });
   if (isSending) return res.status(400).json({ error: "Already sending" });
 
-  const { rows, phoneColumn, message, minDelay = 5, maxDelay = 10 } = req.body;
+  const { rows, phoneColumn, message, minDelay = 5, maxDelay = 10, pdfFilename, pdfOriginalName } = req.body;
 
   if (!rows?.length) return res.status(400).json({ error: "No contacts provided" });
   if (!phoneColumn) return res.status(400).json({ error: "Phone column not specified" });
@@ -187,6 +211,15 @@ app.post("/api/send", async (req, res) => {
   (async () => {
     let sent = 0, failed = 0;
     io.emit("send:start", { total: rows.length });
+
+    let media = null;
+    if (pdfFilename) {
+      const pdfPath = path.join(pdfDir, pdfFilename);
+      if (fs.existsSync(pdfPath)) {
+        media = MessageMedia.fromFilePath(pdfPath);
+        if (pdfOriginalName) media.filename = pdfOriginalName;
+      }
+    }
 
     for (let i = 0; i < rows.length; i++) {
       if (sendAbort) { io.emit("send:aborted", { sent, failed }); break; }
@@ -207,7 +240,11 @@ app.post("/api/send", async (req, res) => {
         if (!isRegistered) {
           io.emit("send:result", { index: i, phone: rawPhone, status: "failed", reason: "Not on WhatsApp", sent, failed: ++failed, total: rows.length });
         } else {
-          await waClient.sendMessage(phone, text);
+          if (media) {
+            await waClient.sendMessage(phone, media, { caption: text });
+          } else {
+            await waClient.sendMessage(phone, text);
+          }
           sent++;
           io.emit("send:result", { index: i, phone: rawPhone, status: "sent", sent, failed, total: rows.length });
         }
@@ -224,6 +261,11 @@ app.post("/api/send", async (req, res) => {
 
     isSending = false;
     io.emit("send:done", { sent, failed, total: rows.length });
+
+    if (pdfFilename) {
+      const pdfPath = path.join(pdfDir, pdfFilename);
+      if (fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+    }
   })();
 });
 
