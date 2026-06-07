@@ -48,23 +48,50 @@ let waPhone = null;
 let isSending = false;
 let sendAbort = false;
 
+// ─── Chrome executable detection ──────────────────────────────────────────────
+// Order of preference:
+//   1. PUPPETEER_EXECUTABLE_PATH env var (Docker / Railway sets this)
+//   2. First existing path from common system locations
+//   3. undefined → puppeteer falls back to its bundled chromium
+function resolveChromePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  const candidates = [
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+const CHROME_PATH = resolveChromePath();
+const AUTH_DIR = process.env.WA_AUTH_DIR || path.join(__dirname, ".wwebjs_auth");
+
 // ─── WhatsApp client setup ─────────────────────────────────────────────────────
 function createClient() {
+  const puppeteerOptions = {
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
+      "--no-zygote",
+      "--disable-gpu",
+    ],
+  };
+  if (CHROME_PATH) puppeteerOptions.executablePath = CHROME_PATH;
+
   const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: path.join(__dirname, ".wwebjs_auth") }),
-    puppeteer: {
-      executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-      ],
-    },
+    authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
+    puppeteer: puppeteerOptions,
   });
 
   client.on("qr", async (qr) => {
@@ -279,18 +306,23 @@ io.on("connection", (socket) => {
   socket.emit("wa:status", { status: waStatus, phone: waPhone });
 });
 
+// ─── Health check (used by Railway / load balancers) ──────────────────────────
+app.get("/healthz", (req, res) => res.json({ ok: true, wa: waStatus }));
+
 // ─── Auto-reconnect if auth exists ────────────────────────────────────────────
-const authPath = path.join(__dirname, ".wwebjs_auth");
-if (fs.existsSync(authPath)) {
+if (fs.existsSync(AUTH_DIR)) {
   console.log("🔁 Found saved session — reconnecting...");
   connectWhatsApp();
 }
 
 // ─── Start server ──────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+const HOST = process.env.HOST || "0.0.0.0";
+server.listen(PORT, HOST, () => {
   console.log(`\n╔══════════════════════════════════════╗`);
   console.log(`║  WhatsApp Sender (Educational)        ║`);
-  console.log(`║  http://localhost:${PORT}                 ║`);
-  console.log(`╚══════════════════════════════════════╝\n`);
+  console.log(`║  http://${HOST}:${PORT}                ║`);
+  console.log(`╚══════════════════════════════════════╝`);
+  console.log(`Chrome path: ${CHROME_PATH || "(puppeteer bundled)"}`);
+  console.log(`Auth dir:    ${AUTH_DIR}\n`);
 });

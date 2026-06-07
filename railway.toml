@@ -1,0 +1,15 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node server.js"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Persist WhatsApp Web auth across redeploys/restarts.
+# Add a Railway Volume in the dashboard and mount it at /data
+# (the container writes its session to /data/.wwebjs_auth — set via
+# the WA_AUTH_DIR env var in the Dockerfile).

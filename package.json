@@ -3,8 +3,13 @@
   "version": "1.0.0",
   "description": "WhatsApp bulk messaging tool — educational use only",
   "main": "server.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "docker:build": "docker build -t whatsapp-sender .",
+    "docker:run": "docker run --rm -p 3000:3000 -v wa_auth:/data whatsapp-sender"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.6.0",
