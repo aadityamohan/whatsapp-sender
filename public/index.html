@@ -605,7 +605,8 @@
   }
 
   function capitaliseName(row) {
-    if (row.name) row.name = row.name.charAt(0).toUpperCase() + row.name.slice(1);
+    const key = Object.keys(row).find(k => k.toLowerCase() === 'name');
+    if (key && row[key]) row[key] = row[key].charAt(0).toUpperCase() + row[key].slice(1);
     return row;
   }
 

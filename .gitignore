@@ -8,6 +8,9 @@ uploads/
 *.log
 npm-debug.log*
 
+contacts.csv
+*.contacts.csv
+
 .env
 .env.local
 .env.*.local
